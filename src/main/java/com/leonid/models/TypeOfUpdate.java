@@ -1,0 +1,15 @@
+package com.leonid.models;
+
+public enum TypeOfUpdate {
+//    INIT_REMEMBER_GROUP_CHAT_ID,
+    BOT_ADDED_AS_MEMBER,
+    BOT_ADDED_AS_ADMIN,
+    DEMOTED_TO_MEMBER,
+    LEFT_FROM_GROUP,
+    KICKED,
+    ADMIN_PLAIN_TEXT,
+    ADMIN_CALLBACK,
+    START,
+    POLL_ANSWER,
+    SOMETHING_ELSE
+}
