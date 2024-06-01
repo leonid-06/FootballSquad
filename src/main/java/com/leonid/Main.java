@@ -14,6 +14,9 @@ public class Main {
         String botToken = System.getenv("BOT_TOKEN");
         String adminUser = System.getenv("ADMIN_USER");
 
+        System.out.println("FROM ENV " + botToken);
+        System.out.println("FROM ENV " + adminUser);
+
         try {
             TelegramBotsLongPollingApplication botsApplication = new TelegramBotsLongPollingApplication();
             botsApplication.registerBot(botToken, new PlanningBot(botToken, adminUser));

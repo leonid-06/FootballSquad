@@ -108,7 +108,7 @@ public class PlanningBot implements LongPollingSingleThreadUpdateConsumer {
                     case "send_poll" -> sendPoll();
                     case "distribution" -> {
 
-                        if (LocalBase.getActivePlayers().size()<4){
+                        if (LocalBase.getActivePlayers().size() < 4) {
                             logger.error(LocalBase.getInfo(type) + " in distribution");
                             System.out.println(LocalBase.getInfo(type) + " in distribution");
                             return;
@@ -338,13 +338,10 @@ public class PlanningBot implements LongPollingSingleThreadUpdateConsumer {
         if (update.hasPollAnswer())
             return TypeOfUpdate.POLL_ANSWER;
 
-        if (update.hasMessage() && update.getMessage().hasText() && update.getMessage().getText().equals("/start"))
-            return TypeOfUpdate.START;
-
         return TypeOfUpdate.SOMETHING_ELSE;
     }
 
-    private void exceptionProcess(TelegramApiException e){
+    private void exceptionProcess(TelegramApiException e) {
         logger.error(e.getMessage());
         SendMessage sendMessage = SendMessage.builder()
                 .text("O, nooo, we have exception")

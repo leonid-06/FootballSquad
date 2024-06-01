@@ -96,7 +96,7 @@ public class LocalBase {
                 "\n5) Was greating " + wasGreeting +
                 "\n6) Current Player " + LocalBase.currentPlayer +
                 "\n7) Type of update " + type +
-                "\n\n";
+                "\n<br/><br/>";
     }
 
 }
