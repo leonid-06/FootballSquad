@@ -7,6 +7,8 @@ import java.util.*;
 
 public class Distribution {
 
+    public static final int MIN_COUNT_OF_PLAYERS = 8;
+
     private final ArrayList<Player> activePlayersList;
 
     public Distribution(ArrayList<Player> players) {
@@ -14,6 +16,8 @@ public class Distribution {
     }
 
     public ArrayList<Team> getTeams() {
+
+        if (activePlayersList.size()<MIN_COUNT_OF_PLAYERS) return new ArrayList<>();
 
         int activePlayer = activePlayersList.size();
         int countOfTeams = getCountTeams(activePlayer);
@@ -45,9 +49,7 @@ public class Distribution {
 
         // change teams
         formReserveBench(teams);
-
         return teams;
-
     }
 
     private void formReserveBench(ArrayList<Team> teams) {
@@ -57,7 +59,7 @@ public class Distribution {
             if (team.getMainPlayers().size() > 5) {
                 team.getSubstitutePlayers().addAll(team.getMainPlayers().subList(5, team.getMainPlayers().size()));
                 while (team.getMainPlayers().size() > 5) {
-                    team.getMainPlayers().remove(team.getMainPlayers().size() - 1);
+                    team.getMainPlayers().removeLast();
                 }
             }
         }
@@ -74,14 +76,6 @@ public class Distribution {
     // Teams
     public int[] getPrioritiesForTeam(int[] generalRatings) {
         int[] retVal = new int[generalRatings.length];
-//        Arrays.fill(retVal, -1);
-//        int randomValue;
-//        for (int i = 0; i < retVal.length; i++) {
-//            randomValue = (int) Math.floor(Math.random() * countOfTeams);
-//            if (!containSuchNumber(retVal, randomValue)) {
-//                retVal[i] = randomValue;
-//            } else i--;
-//        }
 
         LinkedHashMap<Integer, Integer> map = new LinkedHashMap<>();
 
@@ -100,17 +94,11 @@ public class Distribution {
         return retVal;
     }
 
-    private boolean containSuchNumber(int[] array, int number) {
-        for (int j : array) if (j == number) return true;
-        return false;
-    }
-
     private Optional<Player> getMaxFreeRatingPlayer() {
         return activePlayersList.stream()
                 .filter(player -> !player.isBelongTeam())
                 .max(Comparator.comparingInt(Player::getRating));
     }
-
 
     public int getCountTeams(int activePlayer) {
         return (activePlayer % 5 < 4) ? activePlayer / 5 : activePlayer / 5 + 1;

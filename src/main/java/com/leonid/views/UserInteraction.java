@@ -1,6 +1,5 @@
 package com.leonid.views;
 
-import com.leonid.data.LocalBase;
 import com.leonid.models.Player;
 import com.leonid.models.Team;
 import org.telegram.telegrambots.meta.api.objects.replykeyboard.InlineKeyboardMarkup;
@@ -76,16 +75,15 @@ public class UserInteraction {
         return retVal.toString();
     }
 
-    public static ReplyKeyboard getPlayersEditMarkup() {
+    public static ReplyKeyboard getPlayersEditMarkup(List<Player> activePlayers) {
         List<InlineKeyboardRow> rows = new ArrayList<>();
-        for (int i = 0; i < LocalBase.getPlayers().size(); i++) {
-            Player player = LocalBase.getPlayers().get(i);
+        for (Player player : activePlayers) {
             String name = player.getName();
             String userName = player.getUserName();
             var playerButton = new InlineKeyboardRow(
                     InlineKeyboardButton.builder()
                             .text(name)
-                            .callbackData("edit_rating"+userName)
+                            .callbackData("edit_rating" + userName)
                             .build());
             rows.add(playerButton);
         }

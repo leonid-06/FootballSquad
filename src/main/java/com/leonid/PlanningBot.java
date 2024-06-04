@@ -3,6 +3,7 @@ package com.leonid;
 import ch.qos.logback.classic.Logger;
 import com.leonid.business.Distribution;
 import com.leonid.data.LocalBase;
+import com.leonid.data.PlayerRepository;
 import com.leonid.models.Player;
 import com.leonid.models.Team;
 import com.leonid.models.TypeOfUpdate;
@@ -21,6 +22,7 @@ import org.telegram.telegrambots.meta.exceptions.TelegramApiException;
 import org.telegram.telegrambots.meta.generics.TelegramClient;
 
 import java.util.ArrayList;
+import java.util.List;
 import java.util.Optional;
 
 public class PlanningBot implements LongPollingSingleThreadUpdateConsumer {
@@ -28,94 +30,91 @@ public class PlanningBot implements LongPollingSingleThreadUpdateConsumer {
     private final TelegramClient telegramClient;
     private static final Logger logger = (Logger) LoggerFactory.getLogger(PlanningBot.class);
 
-    public PlanningBot(String botToken, String adminUser) {
+    public PlanningBot(String botToken, String adminUser, String pathToData, String pathToLogs) {
         telegramClient = new OkHttpTelegramClient(botToken);
         LocalBase.adminUserName = adminUser;
+        LocalBase.pathToData = pathToData;
+        LocalBase.pathToLogs = pathToLogs;
     }
 
     @Override
     public void consume(Update update) {
 
         TypeOfUpdate type = getType(update);
+        PlayerRepository repository = new PlayerRepository();
 
         switch (type) {
             case ADMIN_PLAIN_TEXT -> {
                 String text = update.getMessage().getText();
                 if (LocalBase.adminChatId == 0) LocalBase.adminChatId = update.getMessage().getChatId();
-                if (text.equals("/start") && LocalBase.groupChatId != 0) showManageMenu();
+                if (text.equals("/start")) showManageMenu(LocalBase.adminChatId);
             }
             case POLL_ANSWER -> {
                 PollAnswer pollAnswer = update.getPollAnswer();
-
-                if (isYes(pollAnswer)) {
-                    Player player = LocalBase.identifyUser(pollAnswer);
-                    LocalBase.addActivePlayer(player);
-//                    managePlayersWithoutRating();
-                } else if (isNo(pollAnswer)) {
-                    Player player = LocalBase.identifyUser(pollAnswer);
-                    LocalBase.addPlayer(player);
-//                    managePlayersWithoutRating();
-                }
+                repository.identifyUser(pollAnswer);
             }
             case ADMIN_CALLBACK -> {
                 String text = update.getCallbackQuery().getData();
                 Integer messageId = update.getCallbackQuery().getMessage().getMessageId();
+
+                // when we type "edit" -> "and chose who" in admin panel
+                // we assign current player to LocalBase
+                if (text.startsWith("edit_rating")) {
+                    LocalBase.currentUsername = text.substring(11);
+                    deleteMessage(messageId);
+                    sendAssessment(LocalBase.currentUsername);
+                }
+
+                // when we clicked on 84 or 72
+                // we update current player in Local Base and update json file
                 if (text.startsWith("rating")) {
                     int rating = Integer.parseInt(text.substring(6, 8));
                     String userName = text.substring(8);
-                    LocalBase.signRating(userName, rating);
-                    LocalBase.currentRating = 75;
-                    Optional<Player> curPl = LocalBase.getByUserName(userName);
-                    curPl.ifPresent(player -> LocalBase.currentPlayer = player);
 
-                    deleteMessage(messageId);
-                }
-                if (text.startsWith("edit_rating")) {
-                    String userName = text.substring(11);
-                    System.out.println("edit_rating " + userName);
-                    Optional<Player> player = LocalBase.getByUserName(userName);
-                    if (player.isPresent()) {
-                        deleteMessage(messageId);
-                        LocalBase.currentPlayer = player.get();
-                        sendAssessment(LocalBase.currentPlayer);
+                    Optional<Player> optionalPlayer = repository.getByUserName(userName);
+                    if (optionalPlayer.isPresent()) {
+                        Player player = optionalPlayer.get();
+                        player.setRating(rating);
+                        repository.update(player);
                     }
 
+                    LocalBase.currentRating = 75;
+                    deleteMessage(messageId);
                 }
+
                 switch (text) {
                     case "morePrev" -> {
                         LocalBase.currentRating -= 5;
-                        editAssessment(messageId, LocalBase.currentPlayer);
+                        editAssessment(messageId);
                     }
                     case "prev" -> {
                         LocalBase.currentRating--;
-                        editAssessment(messageId, LocalBase.currentPlayer);
+                        editAssessment(messageId);
                     }
                     case "next" -> {
                         LocalBase.currentRating++;
-                        editAssessment(messageId, LocalBase.currentPlayer);
+                        editAssessment(messageId);
                     }
                     case "moreNext" -> {
                         LocalBase.currentRating += 5;
-                        editAssessment(messageId, LocalBase.currentPlayer);
+                        editAssessment(messageId);
                     }
+                    case "edit_player" -> showPlayersToEdit(repository.getAll());
 
-                    case "edit_player" -> {
-                        showPlayersToEdit();
-                    }
-
-                    case "show_players" -> showPlayers();
+                    case "show_players" -> showPlayers(repository.getAll());
                     case "leave" -> leave();
-                    case "send_poll" -> sendPoll();
+                    case "send_poll" -> sendPoll(repository);
                     case "distribution" -> {
 
-                        if (LocalBase.getActivePlayers().size() < 4) {
+                        List<Player> activePlayers = repository.getActive();
+
+                        if (activePlayers.size() < Distribution.MIN_COUNT_OF_PLAYERS) {
                             logger.error(LocalBase.getInfo(type) + " in distribution");
-                            System.out.println(LocalBase.getInfo(type) + " in distribution");
                             return;
                         }
 
                         Distribution distribution =
-                                new Distribution((ArrayList<Player>) LocalBase.getActivePlayers());
+                                new Distribution((ArrayList<Player>) activePlayers);
                         ArrayList<Team> teams = distribution.getTeams();
                         showDistributedTeams(teams);
                     }
@@ -123,14 +122,12 @@ public class PlanningBot implements LongPollingSingleThreadUpdateConsumer {
                 }
             }
             case BOT_ADDED_AS_ADMIN -> {
-
-                if (!LocalBase.wasGreeting) {
-                    LocalBase.groupChatId = update.getMyChatMember().getChat().getId();
-                    initialGreeting();
-                    LocalBase.wasGreeting = true;
-                }
+                if (LocalBase.groupChatId != 0) return;
+                LocalBase.groupChatId = update.getMyChatMember().getChat().getId();
+                initialGreeting(LocalBase.groupChatId);
             }
-            case SOMETHING_ELSE -> {
+            case LEFT_FROM_GROUP, DEMOTED_TO_MEMBER -> LocalBase.hardReset();
+            default -> {
                 return;
             }
         }
@@ -152,14 +149,26 @@ public class PlanningBot implements LongPollingSingleThreadUpdateConsumer {
         executeSendMessage(sendMessage);
     }
 
-    private void showPlayersToEdit() {
-        SendMessage sendMessage = SendMessage.builder()
-                .text("Select player for edit: ")
-                .chatId(LocalBase.adminChatId)
-                .replyMarkup(UserInteraction.getPlayersEditMarkup())
-                .build();
+    private void showPlayersToEdit(List<Player> activePlayers) {
 
-        executeSendMessage(sendMessage);
+        if (activePlayers == null || activePlayers.isEmpty()){
+            String message = "There are any players ";
+            SendMessage sendMessage = SendMessage.builder()
+                    .text(message)
+                    .chatId(LocalBase.adminChatId)
+                    .build();
+            executeSendMessage(sendMessage);
+        } else {
+            String message = "Select player for edit: ";
+            SendMessage sendMessage = SendMessage.builder()
+                    .text(message)
+                    .chatId(LocalBase.adminChatId)
+                    .replyMarkup(UserInteraction.getPlayersEditMarkup(activePlayers))
+                    .build();
+            executeSendMessage(sendMessage);
+        }
+
+
     }
 
     private void leave() {
@@ -174,12 +183,16 @@ public class PlanningBot implements LongPollingSingleThreadUpdateConsumer {
         try {
             telegramClient.execute(leaveChat);
         } catch (TelegramApiException e) {
-            System.err.println("Error with send Leave");
+            SendMessage sendMessage = SendMessage.builder()
+                    .text("Error with chat leave. (exception)")
+                    .chatId(LocalBase.adminChatId)
+                    .build();
+            executeSendMessage(sendMessage);
         }
     }
 
-    private void showPlayers() {
-        String text = UserInteraction.getPrettyText(LocalBase.getPlayers());
+    private void showPlayers(List<Player> active) {
+        String text = UserInteraction.getPrettyText(active);
         if (text.isBlank()) text = "Nobody was added";
         SendMessage sendMessage = SendMessage.builder()
                 .text(text)
@@ -188,34 +201,35 @@ public class PlanningBot implements LongPollingSingleThreadUpdateConsumer {
         executeSendMessage(sendMessage);
     }
 
-    private void showManageMenu() {
+    private void showManageMenu(Long chatId) {
         SendMessage sendMessage = SendMessage.builder()
                 .text("Manage menu")
-                .chatId(LocalBase.adminChatId)
+                .chatId(chatId)
                 .replyMarkup(UserInteraction.getManageMenuMarkup())
                 .build();
         executeSendMessage(sendMessage);
 
     }
 
-    private void initialGreeting() {
+    private void initialGreeting(Long chatId) {
         String text = "Привіт, я буду створювати опитування щочетверга і генерувати " +
                 "приблизно рівні склади в суботу вранці. Я поки не вмію взаємодіяти " +
                 "зі звичайним користувачем, тому можете мені не писати";
 
         SendMessage sendMessage = SendMessage.builder()
                 .text(text)
-                .chatId(LocalBase.groupChatId)
+                .chatId(chatId)
                 .build();
         executeSendMessage(sendMessage);
     }
 
-    private void editAssessment(Integer messageId, Player player) {
+    private void editAssessment(Integer messageId) {
+
         EditMessageText editMessageText = EditMessageText.builder()
                 .chatId(LocalBase.adminChatId)
                 .messageId(messageId)
-                .text("Rate " + player.getName() + " (" + player.getUserName() + ") player")
-                .replyMarkup(UserInteraction.getAssignRatingMarkup(player.getUserName(), LocalBase.currentRating))
+                .text("Rate @" + LocalBase.currentUsername + " player")
+                .replyMarkup(UserInteraction.getAssignRatingMarkup(LocalBase.currentUsername, LocalBase.currentRating))
                 .build();
         executeEditMessage(editMessageText);
     }
@@ -237,16 +251,16 @@ public class PlanningBot implements LongPollingSingleThreadUpdateConsumer {
         executeDeleteMessage(deleteMessage);
     }
 
-    private void sendAssessment(Player player) {
+    private void sendAssessment(String username) {
         SendMessage sendMessage = SendMessage.builder()
                 .chatId(LocalBase.adminChatId)
-                .text("Rate " + player.getName() + " (" + player.getUserName() + ") player")
-                .replyMarkup(UserInteraction.getAssignRatingMarkup(player.getUserName(), LocalBase.currentRating))
+                .text("Rate @" + username + " player")
+                .replyMarkup(UserInteraction.getAssignRatingMarkup(username, LocalBase.currentRating))
                 .build();
         executeSendMessage(sendMessage);
     }
 
-    private void sendPoll() {
+    private void sendPoll(PlayerRepository repository) {
         SendPoll poll = SendPoll.builder()
                 .chatId(LocalBase.groupChatId)
                 .isAnonymous(false)
@@ -256,15 +270,8 @@ public class PlanningBot implements LongPollingSingleThreadUpdateConsumer {
                 .build();
         executeSendPoll(poll);
 
-        if (!LocalBase.getActivePlayers().isEmpty()) LocalBase.getActivePlayers().clear();
-    }
+        repository.resetWeek();
 
-    private boolean isYes(PollAnswer pollAnswer) {
-        return pollAnswer.getOptionIds().getFirst().equals(0);
-    }
-
-    private boolean isNo(PollAnswer pollAnswer) {
-        return pollAnswer.getOptionIds().getFirst().equals(1);
     }
 
     private void executeSendPoll(SendPoll sendPoll) {
@@ -292,10 +299,10 @@ public class PlanningBot implements LongPollingSingleThreadUpdateConsumer {
     }
 
     private TypeOfUpdate getType(Update update) {
-        if (update.hasMyChatMember()
-                && update.getMyChatMember().getNewChatMember().getStatus().equals("member")
-                && update.getMyChatMember().getOldChatMember().getStatus().equals("left")
-        ) return TypeOfUpdate.BOT_ADDED_AS_MEMBER;
+//        if (update.hasMyChatMember()
+//                && update.getMyChatMember().getNewChatMember().getStatus().equals("member")
+//                && update.getMyChatMember().getOldChatMember().getStatus().equals("left")
+//        ) return TypeOfUpdate.BOT_ADDED_AS_MEMBER;
 
         if (update.hasMyChatMember()
                 && update.getMyChatMember().getNewChatMember().getStatus().equals("administrator")
@@ -326,12 +333,14 @@ public class PlanningBot implements LongPollingSingleThreadUpdateConsumer {
                 && update.getMyChatMember().getNewChatMember().getStatus().equals("kicked")
         ) return TypeOfUpdate.DEMOTED_TO_MEMBER;
 
-        if (update.hasMessage() && !update.hasMyChatMember() && update.getMessage().hasText() &&
-                !update.getMessage().getText().isEmpty() &&
-                update.getMessage().getFrom().getUserName().equals(LocalBase.adminUserName))
+        if (update.hasMessage()
+                && !update.hasMyChatMember() && !update.hasCallbackQuery()
+                && update.getMessage().hasText() && !update.getMessage().getText().isEmpty()
+                && update.getMessage().getFrom().getUserName().equals(LocalBase.adminUserName))
             return TypeOfUpdate.ADMIN_PLAIN_TEXT;
 
-        if (update.hasCallbackQuery() &&
+        if (update.hasCallbackQuery()
+                && !update.hasMyChatMember() && !update.hasPollAnswer() &&
                 update.getCallbackQuery().getFrom().getUserName().equals(LocalBase.adminUserName))
             return TypeOfUpdate.ADMIN_CALLBACK;
 
